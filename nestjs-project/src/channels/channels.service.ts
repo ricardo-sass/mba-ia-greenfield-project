@@ -9,11 +9,22 @@ const MAX_RETRIES = 5;
 
 function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
   if (!(err instanceof QueryFailedError)) return false;
-  const e = err as any;
+
+  const errorSources: unknown[] = [err.driverError as unknown, err];
+  const postgresError = errorSources.find(
+    (source): source is Record<string, unknown> =>
+      typeof source === 'object' &&
+      source !== null &&
+      'code' in source &&
+      'detail' in source,
+  );
+  if (postgresError === undefined || typeof postgresError.detail !== 'string') {
+    return false;
+  }
+
   return (
-    e.code === PG_UNIQUE_VIOLATION &&
-    typeof e.detail === 'string' &&
-    e.detail.includes(column)
+    postgresError.code === PG_UNIQUE_VIOLATION &&
+    postgresError.detail.includes(column)
   );
 }
 
