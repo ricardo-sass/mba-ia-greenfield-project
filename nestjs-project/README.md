@@ -27,6 +27,16 @@
 
 ## Project setup
 
+### Video storage addresses
+
+The backend and worker connect to MinIO using `STORAGE_ENDPOINT=http://minio:9000` inside Docker. Client-facing multipart upload, thumbnail, streaming and download URLs are signed using `STORAGE_PUBLIC_ENDPOINT`, which defaults to `http://minio:9000` for a client on the Docker host. Port 9000 is published by Compose.
+
+Docker resolves `minio` only inside its network. To use the same name from a host browser or CLI, configure a DNS record or hosts-file entry mapping `minio` to the Docker host's reachable IP address. Verify it with `getent hosts minio` and `curl http://minio:9000/minio/health/ready` on the client machine. An alternative public storage domain must likewise resolve to the published MinIO service. The application does not modify the host's DNS configuration.
+
+Set `STORAGE_PUBLIC_ENDPOINT` in `.env` to the storage URL reachable by your client. For another machine or a deployment, use that machine's reachable storage address or HTTPS storage domain. Restart the API after changing the environment. This value is used only for signing; keep `STORAGE_ENDPOINT` on the Docker service name. Do not replace the hostname in an already signed URL: the host is part of its signature.
+
+An upload starts in `draft` with a multipart session. Completion moves it to `processing`; the worker moves it to `ready` or `failed`. Aborting clears the session and leaves the video in `draft`. The `uploading` enum value is accepted for existing records but is not assigned by the current initiation endpoint.
+
 ```bash
 $ npm install
 ```

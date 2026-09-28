@@ -1,0 +1,20 @@
+# Exemplos opcionais: copiar somente os blocos desejados para configuração local.
+# Nada é ativado pela migração. Não versionar credenciais.
+
+[mcp_servers.context7]
+enabled = false
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+
+# Endpoint do Figma Desktop no host; habilitar o servidor MCP no aplicativo.
+[mcp_servers.figma]
+enabled = false
+url = "http://127.0.0.1:3845/mcp"
+
+# Exemplo equivalente à integração PostgreSQL existente, executado no host.
+# Definir DATABASE_URL no ambiente local; o shell expande a variável em runtime.
+[mcp_servers.postgres]
+enabled = false
+command = "sh"
+args = ["-c", 'exec npx -y @modelcontextprotocol/server-postgres "$DATABASE_URL"']
+env_vars = ["DATABASE_URL"]
