@@ -13,6 +13,9 @@ docker compose ps   # all services must show status "running"
 Then verify each infrastructure service is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **MinIO:** `docker compose ps minio minio-init` — expect `minio` healthy and `minio-init` completed successfully
+- **Redis:** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **Video worker:** `docker compose ps video-worker` — expect `running`
 
 Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
 
@@ -34,6 +37,11 @@ docker compose exec nestjs-api npm run start:dev
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — SMTP test service, ports `1025` and `8025`
+- `redis` — BullMQ backing store, port `6379`
+- `minio` — S3-compatible object storage, ports `9000` and `9001`
+- `minio-init` — one-shot bucket creation for `streamtube-videos`
+- `video-worker` — NestJS worker process that consumes BullMQ video jobs and runs FFmpeg/ffprobe
 
 All verification and teardown commands run on the **host machine**:
 
@@ -44,9 +52,17 @@ curl http://localhost:3000
 # Verify PostgreSQL is ready (runs inside the db container)
 docker compose exec db pg_isready -U streamtube
 
+# Verify Redis is ready
+docker compose exec redis redis-cli ping
+
+# Verify storage bucket provisioning ran
+docker compose ps minio minio-init video-worker
+
 # Check container logs
 docker compose logs nestjs-api
 docker compose logs db
+docker compose logs video-worker
+docker compose logs minio-init
 
 # Tear down the entire environment
 docker compose down
@@ -148,6 +164,28 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+
+### Videos Module
+
+`src/videos/` implements Phase 03 upload and processing:
+
+- `POST /videos/uploads` creates an authenticated owner video in `draft` status and initiates direct multipart upload to MinIO/S3.
+- `POST /videos/:id/upload-parts/sign` returns presigned upload-part URLs. Video bytes are uploaded directly to storage, not proxied through the API.
+- `POST /videos/:id/upload-complete` completes the multipart upload, transitions the video to `processing`, persists a processing job, and enqueues `video.process` in BullMQ.
+- `DELETE /videos/:id/upload` aborts an open multipart upload and returns the video to `draft`.
+- `GET /videos/:id` returns owner-only lifecycle and metadata details.
+- `GET /videos/:publicId/stream-url` and `GET /videos/:publicId/download-url` return short-lived signed storage URLs only for `ready` videos.
+
+The `video-worker` Compose service runs `src/worker-main.ts`, registers `VideosWorkerModule`, consumes BullMQ jobs from Redis, downloads the source object to worker-local temp storage, runs `ffprobe` for metadata and `ffmpeg` for thumbnail generation, uploads processed media and thumbnails to MinIO/S3, and updates the video status to `ready` or `failed`.
+
+The active lifecycle is `draft` -> `processing` -> `ready` or `failed`. An open upload requires both `multipart_upload_id` and `original_object_key`. `uploading` remains accepted by the enum and open-upload checks, but current initiation produces `draft`.
+
+Storage configuration uses Docker service hosts:
+
+- `STORAGE_ENDPOINT=http://minio:9000`
+- `STORAGE_PUBLIC_ENDPOINT=http://minio:9000` is used only for client-facing signatures, never for container-to-container requests. Configure the external storage hostname for remote clients and deployments; preserve the signed host when routing requests.
+- `STORAGE_BUCKET=streamtube-videos`
+- `QUEUE_REDIS_HOST=redis`
 
 ## Code Conventions
 
