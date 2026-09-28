@@ -6,12 +6,6 @@ const POSTGRES_UNIQUE_VIOLATION = '23505';
 
 type PersistWithPublicId<T> = (publicId: string) => Promise<T>;
 type PublicIdGenerator = () => string;
-type NanoidModule = typeof import('nanoid');
-
-// eslint-disable-next-line @typescript-eslint/no-implied-eval -- nanoid v5 is ESM-only; keep dynamic import intact under CommonJS Jest/runtime.
-const loadNanoid = Function(
-  'return import("nanoid")',
-) as () => Promise<NanoidModule>;
 
 function isUniqueConstraintViolation(error: unknown): boolean {
   return (
@@ -49,7 +43,7 @@ export class VideoPublicIdService {
 
   private async generator(): Promise<PublicIdGenerator> {
     if (this.generateCandidate === undefined) {
-      const { customAlphabet, urlAlphabet } = await loadNanoid();
+      const { customAlphabet, urlAlphabet } = await import('nanoid');
       this.generateCandidate = customAlphabet(urlAlphabet, PUBLIC_ID_LENGTH);
     }
 

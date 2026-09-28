@@ -110,7 +110,7 @@ describe('VideosService (integration)', () => {
         owner_user_id: user.id,
         channel_id: channel.id,
         public_id: `public_${Date.now()}`,
-        status: VideoStatus.UPLOADING,
+        status: VideoStatus.DRAFT,
         original_object_key: `videos/raw/${user.id}/video-1/clip.mp4`,
         multipart_upload_id: 'upload-1',
         original_filename: 'clip.mp4',
@@ -177,7 +177,7 @@ describe('VideosService (integration)', () => {
     await expect(
       videoRepository.findOneByOrFail({ id: video.id }),
     ).resolves.toMatchObject({
-      status: VideoStatus.UPLOADING,
+      status: VideoStatus.DRAFT,
       multipart_upload_id: 'upload-1',
     });
     await expect(
@@ -187,5 +187,36 @@ describe('VideosService (integration)', () => {
       processingJobRepository.countBy({ video_id: video.id }),
     ).resolves.toBe(0);
     expect(queueService.enqueueProcessJob).not.toHaveBeenCalled();
+  });
+
+  it('marks video and processing job failed when queue enqueue fails', async () => {
+    const video = await createOpenUpload();
+    queueService.enqueueProcessJob.mockRejectedValueOnce(
+      new Error('redis down'),
+    );
+
+    await expect(
+      service.completeUpload({
+        ownerUserId: video.owner_user_id,
+        videoId: video.id,
+        parts: [{ partNumber: 1, eTag: '"etag-1"' }],
+      }),
+    ).rejects.toThrow('Failed to enqueue video processing');
+
+    await expect(
+      videoRepository.findOneByOrFail({ id: video.id }),
+    ).resolves.toMatchObject({
+      status: VideoStatus.FAILED,
+      failure_reason: 'Failed to enqueue video processing job',
+    });
+
+    const job = await processingJobRepository.findOneByOrFail({
+      video_id: video.id,
+    });
+    expect(job).toMatchObject({
+      status: 'failed',
+      last_error: 'Failed to enqueue video processing job',
+      bullmq_job_id: null,
+    });
   });
 });

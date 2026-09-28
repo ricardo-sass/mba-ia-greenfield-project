@@ -49,7 +49,7 @@ export class VideosController {
   @ApiOperation({
     summary: 'Initiate a multipart video upload',
     description:
-      'Creates an uploading video draft and starts a direct-to-storage multipart upload.',
+      'Creates a video draft and starts a direct-to-storage multipart upload.',
   })
   @ApiResponse({
     status: 201,

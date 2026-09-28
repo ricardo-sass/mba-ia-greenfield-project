@@ -20,7 +20,7 @@ export interface InitiateVideoUploadForOwnerInput {
 export interface InitiateVideoUploadResult {
   id: string;
   publicId: string;
-  status: VideoStatus.UPLOADING;
+  status: VideoStatus.DRAFT;
   multipartUploadId: string;
   objectKey: string;
   partSizeBytes: number;

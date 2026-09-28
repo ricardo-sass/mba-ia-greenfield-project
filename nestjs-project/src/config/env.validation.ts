@@ -5,7 +5,7 @@ export const envValidationSchema = Joi.object({
     .valid('development', 'production', 'test')
     .default('development'),
   PORT: Joi.number().port().default(3000),
-  DB_HOST: Joi.string().default('localhost'),
+  DB_HOST: Joi.string().default('db'),
   DB_PORT: Joi.number().default(5432),
   DB_USERNAME: Joi.string().required(),
   DB_PASSWORD: Joi.string().required(),
@@ -22,6 +22,9 @@ export const envValidationSchema = Joi.object({
   MAIL_FROM: Joi.string().default('"StreamTube" <noreply@streamtube.com>'),
   SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
   STORAGE_ENDPOINT: Joi.string().uri().required(),
+  STORAGE_PUBLIC_ENDPOINT: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .default('http://minio:9000'),
   STORAGE_REGION: Joi.string().required(),
   STORAGE_BUCKET: Joi.string().required(),
   STORAGE_ACCESS_KEY_ID: Joi.string().required(),

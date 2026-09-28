@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { request, type IncomingHttpHeaders } from 'node:http';
 import {
   CreateBucketCommand,
   DeleteObjectCommand,
@@ -9,6 +10,7 @@ import { VideosStorageService } from './videos-storage.service';
 
 const storage = {
   endpoint: process.env.STORAGE_ENDPOINT ?? 'http://minio:9000',
+  publicEndpoint: 'http://media.example.test:9000',
   region: process.env.STORAGE_REGION ?? 'us-east-1',
   bucket: process.env.STORAGE_BUCKET ?? 'streamtube-videos',
   accessKeyId: process.env.STORAGE_ACCESS_KEY_ID ?? 'streamtube',
@@ -19,6 +21,57 @@ const storage = {
   ),
   readUrlTtlSeconds: Number(process.env.STORAGE_READ_URL_TTL_SECONDS ?? 300),
 };
+
+// Route through Docker while preserving the client-facing signed Host header.
+async function requestSignedUrl(
+  signedUrl: string,
+  options: {
+    method?: string;
+    body?: string;
+    headers?: Record<string, string>;
+  } = {},
+): Promise<{
+  status: number | undefined;
+  headers: IncomingHttpHeaders;
+  body: string;
+}> {
+  const publicUrl = new URL(signedUrl);
+  const internalUrl = new URL(storage.endpoint);
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        hostname: internalUrl.hostname,
+        port: internalUrl.port,
+        path: publicUrl.pathname + publicUrl.search,
+        method: options.method ?? 'GET',
+        headers: {
+          Host: publicUrl.host,
+          ...(options.body
+            ? { 'Content-Length': Buffer.byteLength(options.body) }
+            : {}),
+          ...options.headers,
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('error', reject);
+        res.on('end', () =>
+          resolve({
+            status: res.statusCode,
+            headers: res.headers,
+            body: Buffer.concat(chunks).toString(),
+          }),
+        );
+      },
+    );
+    req.on('error', reject);
+    req.setTimeout(10000, () =>
+      req.destroy(new Error('Signed storage request timed out')),
+    );
+    req.end(options.body);
+  });
+}
 
 describe('VideosStorageService (integration)', () => {
   let service: VideosStorageService;
@@ -80,13 +133,14 @@ describe('VideosStorageService (integration)', () => {
     });
     expect(uploadPart.expiresInSeconds).toBe(storage.uploadPartUrlTtlSeconds);
 
-    const uploadResponse = await fetch(uploadPart.url, {
+    expect(new URL(uploadPart.url).origin).toBe(storage.publicEndpoint);
+    const uploadResponse = await requestSignedUrl(uploadPart.url, {
       method: 'PUT',
       body: 'hello video',
     });
-    expect(uploadResponse.ok).toBe(true);
+    expect(uploadResponse.status).toBe(200);
 
-    const eTag = uploadResponse.headers.get('etag');
+    const eTag = uploadResponse.headers.etag;
     expect(eTag).toBeTruthy();
 
     await service.completeMultipartUpload({
@@ -99,9 +153,25 @@ describe('VideosStorageService (integration)', () => {
     expect(streamUrl.url).toContain(objectKey);
     expect(streamUrl.expiresInSeconds).toBe(storage.readUrlTtlSeconds);
 
-    const readResponse = await fetch(streamUrl.url);
-    expect(readResponse.ok).toBe(true);
-    await expect(readResponse.text()).resolves.toBe('hello video');
+    expect(new URL(streamUrl.url).origin).toBe(storage.publicEndpoint);
+    const readResponse = await requestSignedUrl(streamUrl.url, {
+      headers: { Range: 'bytes=0-4' },
+    });
+    expect(readResponse.status).toBe(206);
+    expect(readResponse.headers['content-range']).toBe('bytes 0-4/11');
+    expect(readResponse.body).toBe('hello');
+
+    const downloadUrl = await service.presignDownloadUrl({
+      objectKey,
+      downloadFilename: 'clip.txt',
+    });
+    expect(new URL(downloadUrl.url).origin).toBe(storage.publicEndpoint);
+    const downloadResponse = await requestSignedUrl(downloadUrl.url);
+    expect(downloadResponse.status).toBe(200);
+    expect(downloadResponse.headers['content-disposition']).toBe(
+      'attachment; filename="clip.txt"',
+    );
+    expect(downloadResponse.body).toBe('hello video');
 
     const abortKey = `videos/raw/test-owner/test-video/${Date.now()}-abort.txt`;
     const abortInit = await service.initiateMultipartUpload({

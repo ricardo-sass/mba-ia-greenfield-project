@@ -240,6 +240,11 @@ _Subprojects in scope:_
 
 ## Decisions Summary
 
+### Implementation clarifications (2026-09-24)
+
+- TD-06: internal storage I/O uses `STORAGE_ENDPOINT`; signatures use a separate S3 client with `STORAGE_PUBLIC_ENDPOINT`, sharing credentials and region. Local external clients use `http://minio:9000`, while containers connect to `http://minio:9000`. The signed host is preserved.
+- TD-07: `VideosService.initiateUpload()` persists `draft`, with `multipart_upload_id` and `original_object_key` representing the open upload. Completion moves it to `processing`; abort clears that session and leaves `draft`. `uploading` remains an accepted enum value, but the current API never assigns it. This clarifies the implemented lifecycle without changing the historical options above.
+
 | ID | Scope | Decision | Recommendation | Choice |
 |----|-------|----------|----------------|--------|
 | TD-01 | Backend | Processing Queue Technology | BullMQ with Redis | A |

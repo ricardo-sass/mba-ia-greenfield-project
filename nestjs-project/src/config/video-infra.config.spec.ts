@@ -14,6 +14,11 @@ describe('video infrastructure config', () => {
 
   it('should expose storage defaults with Docker service host', () => {
     delete process.env.STORAGE_ENDPOINT;
+    delete process.env.STORAGE_PUBLIC_ENDPOINT;
+    delete process.env.STORAGE_REGION;
+    delete process.env.STORAGE_BUCKET;
+    delete process.env.STORAGE_ACCESS_KEY_ID;
+    delete process.env.STORAGE_SECRET_ACCESS_KEY;
     delete process.env.STORAGE_FORCE_PATH_STYLE;
     delete process.env.STORAGE_UPLOAD_PART_URL_TTL_SECONDS;
     delete process.env.STORAGE_READ_URL_TTL_SECONDS;
@@ -21,6 +26,7 @@ describe('video infrastructure config', () => {
     expect(storageConfig()).toEqual(
       expect.objectContaining({
         endpoint: 'http://minio:9000',
+        publicEndpoint: 'http://minio:9000',
         region: 'us-east-1',
         bucket: 'streamtube-videos',
         accessKeyId: 'streamtube',
@@ -34,6 +40,7 @@ describe('video infrastructure config', () => {
 
   it('should parse storage env values', () => {
     process.env.STORAGE_ENDPOINT = 'http://storage:9000';
+    process.env.STORAGE_PUBLIC_ENDPOINT = 'https://media.example.com';
     process.env.STORAGE_REGION = 'sa-east-1';
     process.env.STORAGE_BUCKET = 'custom-bucket';
     process.env.STORAGE_ACCESS_KEY_ID = 'access-key';
@@ -44,6 +51,7 @@ describe('video infrastructure config', () => {
 
     expect(storageConfig()).toEqual({
       endpoint: 'http://storage:9000',
+      publicEndpoint: 'https://media.example.com',
       region: 'sa-east-1',
       bucket: 'custom-bucket',
       accessKeyId: 'access-key',

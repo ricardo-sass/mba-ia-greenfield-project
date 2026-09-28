@@ -35,8 +35,9 @@ function video(overrides: Partial<Video> = {}): Video {
 
 describe('VideoMediaProcessorService', () => {
   const storageService = {
-    getObjectBuffer: jest.fn(),
+    downloadObjectToFile: jest.fn(),
     uploadObject: jest.fn(),
+    uploadObjectFromFile: jest.fn(),
   } as unknown as jest.Mocked<VideosStorageService>;
   const objectKeysService = {
     processed: jest.fn(),
@@ -47,10 +48,9 @@ describe('VideoMediaProcessorService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    storageService.getObjectBuffer.mockResolvedValue(
-      Buffer.from('video-bytes'),
-    );
+    storageService.downloadObjectToFile.mockResolvedValue(undefined);
     storageService.uploadObject.mockResolvedValue(undefined);
+    storageService.uploadObjectFromFile.mockResolvedValue(undefined);
     objectKeysService.processed.mockReturnValue(
       'videos/processed/owner-1/video-1/clip.mp4',
     );
@@ -115,9 +115,13 @@ describe('VideoMediaProcessorService', () => {
         '1',
       ]),
     );
-    expect(storageService.uploadObject).toHaveBeenCalledWith({
+    expect(storageService.downloadObjectToFile).toHaveBeenCalledWith({
+      objectKey: 'videos/raw/owner-1/video-1/clip.mp4',
+      filePath: expect.stringContaining('source.mp4'),
+    });
+    expect(storageService.uploadObjectFromFile).toHaveBeenCalledWith({
       objectKey: 'videos/processed/owner-1/video-1/clip.mp4',
-      body: Buffer.from('video-bytes'),
+      filePath: expect.stringContaining('source.mp4'),
       contentType: 'video/mp4',
       metadata: { videoId: 'video-1' },
     });

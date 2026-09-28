@@ -8,8 +8,11 @@ import {
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
+  type PutObjectCommandInput,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import storageConfig from '../../config/storage.config';
 import {
   StorageMultipartAbortFailedException,
@@ -64,27 +67,48 @@ interface PresignReadInput {
 
 interface UploadObjectInput {
   objectKey: string;
-  body: Buffer;
+  body: NonNullable<PutObjectCommandInput['Body']>;
   contentType?: string;
   metadata?: Record<string, string>;
+}
+
+interface UploadObjectFromFileInput {
+  objectKey: string;
+  filePath: string;
+  contentType?: string;
+  metadata?: Record<string, string>;
+}
+
+interface DownloadObjectToFileInput {
+  objectKey: string;
+  filePath: string;
 }
 
 @Injectable()
 export class VideosStorageService {
   private readonly s3Client: S3Client;
+  private readonly presignClient: S3Client;
 
   constructor(
     @Inject(storageConfig.KEY)
     private readonly storage: ConfigType<typeof storageConfig>,
   ) {
-    this.s3Client = new S3Client({
-      endpoint: storage.endpoint,
+    const clientConfig = {
       region: storage.region,
       forcePathStyle: storage.forcePathStyle,
       credentials: {
         accessKeyId: storage.accessKeyId,
         secretAccessKey: storage.secretAccessKey,
       },
+    };
+    this.s3Client = new S3Client({
+      ...clientConfig,
+      endpoint: storage.endpoint,
+    });
+    // The public host must be part of the signature, not rewritten afterwards.
+    this.presignClient = new S3Client({
+      ...clientConfig,
+      endpoint: storage.publicEndpoint,
     });
   }
 
@@ -119,7 +143,7 @@ export class VideosStorageService {
   ): Promise<PresignedUrlResult> {
     try {
       const url = await getSignedUrl(
-        this.s3Client,
+        this.presignClient,
         new UploadPartCommand({
           Bucket: this.storage.bucket,
           Key: input.objectKey,
@@ -185,31 +209,22 @@ export class VideosStorageService {
     return this.presignRead(input);
   }
 
-  async getObjectBuffer(objectKey: string): Promise<Buffer> {
+  async downloadObjectToFile(input: DownloadObjectToFileInput): Promise<void> {
     const response = await this.s3Client.send(
       new GetObjectCommand({
         Bucket: this.storage.bucket,
-        Key: objectKey,
+        Key: input.objectKey,
       }),
     );
 
     if (!response.Body) {
-      return Buffer.alloc(0);
+      throw new Error(`Storage object ${input.objectKey} returned no body`);
     }
 
-    const body = response.Body as {
-      transformToByteArray?: () => Promise<Uint8Array>;
-    };
-    if (body.transformToByteArray) {
-      return Buffer.from(await body.transformToByteArray());
-    }
-
-    const chunks: Buffer[] = [];
-    for await (const chunk of response.Body as AsyncIterable<Buffer | string>) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-
-    return Buffer.concat(chunks);
+    await pipeline(
+      this.asNodeReadableStream(response.Body),
+      createWriteStream(input.filePath),
+    );
   }
 
   async uploadObject(input: UploadObjectInput): Promise<void> {
@@ -224,12 +239,21 @@ export class VideosStorageService {
     );
   }
 
+  async uploadObjectFromFile(input: UploadObjectFromFileInput): Promise<void> {
+    await this.uploadObject({
+      objectKey: input.objectKey,
+      body: createReadStream(input.filePath),
+      contentType: input.contentType,
+      metadata: input.metadata,
+    });
+  }
+
   private async presignRead(
     input: PresignReadInput,
   ): Promise<PresignedUrlResult> {
     try {
       const url = await getSignedUrl(
-        this.s3Client,
+        this.presignClient,
         new GetObjectCommand({
           Bucket: this.storage.bucket,
           Key: input.objectKey,
@@ -247,5 +271,14 @@ export class VideosStorageService {
     } catch {
       throw new StoragePresignFailedException();
     }
+  }
+
+  private asNodeReadableStream(body: unknown): NodeJS.ReadableStream {
+    const stream = body as Partial<NodeJS.ReadableStream>;
+    if (typeof stream.pipe !== 'function') {
+      throw new Error('Storage object body is not a Node.js readable stream');
+    }
+
+    return stream as NodeJS.ReadableStream;
   }
 }

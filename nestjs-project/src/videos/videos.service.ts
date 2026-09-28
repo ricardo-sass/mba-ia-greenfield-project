@@ -40,6 +40,9 @@ import type {
   SignVideoUploadPartsResult,
 } from './videos.types';
 
+const PROCESSING_ENQUEUE_FAILURE_REASON =
+  'Failed to enqueue video processing job';
+
 @Injectable()
 export class VideosService {
   constructor(
@@ -91,7 +94,7 @@ export class VideosService {
               owner_user_id: input.ownerUserId,
               channel_id: input.channelId,
               public_id: publicId,
-              status: VideoStatus.UPLOADING,
+              status: VideoStatus.DRAFT,
               original_filename: input.originalFilename,
               mime_type: input.mimeType,
               size_bytes: String(input.sizeBytes),
@@ -120,7 +123,7 @@ export class VideosService {
       return {
         id: video.id,
         publicId: video.public_id,
-        status: VideoStatus.UPLOADING,
+        status: VideoStatus.DRAFT,
         multipartUploadId: multipart.uploadId,
         objectKey: multipart.objectKey,
         partSizeBytes: this.calculatePartSize(input.sizeBytes, input.partCount),
@@ -217,6 +220,10 @@ export class VideosService {
         attempt: 1,
       });
     } catch {
+      await this.markProcessingEnqueueFailed(
+        completion.video.id,
+        completion.processingJob.id,
+      );
       throw new VideoProcessingEnqueueFailedException();
     }
 
@@ -370,7 +377,8 @@ export class VideosService {
 
   private assertUploadOpen(video: Video): void {
     if (
-      video.status !== VideoStatus.UPLOADING ||
+      (video.status !== VideoStatus.DRAFT &&
+        video.status !== VideoStatus.UPLOADING) ||
       !video.multipart_upload_id ||
       !video.original_object_key
     ) {
@@ -469,5 +477,21 @@ export class VideosService {
 
   private parseNullableNumber(value: string | null): number | null {
     return value === null ? null : Number(value);
+  }
+
+  private async markProcessingEnqueueFailed(
+    videoId: string,
+    processingJobId: string,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      await manager.update(Video, videoId, {
+        status: VideoStatus.FAILED,
+        failure_reason: PROCESSING_ENQUEUE_FAILURE_REASON,
+      });
+      await manager.update(VideoProcessingJob, processingJobId, {
+        status: VideoProcessingJobStatus.FAILED,
+        last_error: PROCESSING_ENQUEUE_FAILURE_REASON,
+      });
+    });
   }
 }

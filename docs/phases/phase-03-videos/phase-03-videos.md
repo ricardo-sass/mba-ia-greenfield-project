@@ -3,9 +3,9 @@ kind: phase
 name: phase-03-videos
 test_specs_aware: true
 sources_mtime:
-  docs/phases/phase-03-videos/context.md: "2026-09-22 00:39:59.653476375 -0300"
-  docs/phases/phase-03-videos/library-refs.md: "2026-09-22 00:39:43.610456631 -0300"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-22 00:25:05.345111716 -0300"
+  docs/phases/phase-03-videos/context.md: "2026-09-24 20:06:11.808463058 -0300"
+  docs/phases/phase-03-videos/library-refs.md: "2026-09-24 20:06:11.732448819 -0300"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-24 20:02:28.447483599 -0300"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-09-17 21:41:36.287559685 -0300"
 ---
 
@@ -122,24 +122,24 @@ Deliver video upload and processing for StreamTube: S3-compatible storage for vi
 **Technical actions:**
 
 1. Criar DTOs de aplicação e tipos internos para iniciar upload, assinar partes, completar upload e abortar upload alinhados aos campos de `### API Contracts`.
-2. Criar `VideosService` com `initiateUpload()` — valida proprietário/canal, gera `public_id`, persiste `Video` em `uploading`, inicia multipart no storage e salva `multipart_upload_id`/`original_object_key` (per `phase-03-videos/TD-02`, `phase-03-videos/TD-05`, `phase-03-videos/TD-07`).
-3. Implementar `signUploadParts()` com checagem de owner, status `uploading`, dedupe/range de `part_numbers`, e retorno de URLs assinadas de `UploadPartCommand` (per `phase-03-videos/TD-02`).
-4. Implementar `completeUpload()` em transação: persistir `VideoUploadPart`s, completar multipart, transicionar `uploading` → `processing`, criar `VideoProcessingJob` e adicionar job `video.process` com tentativas/backoff explícitos (per `phase-03-videos/TD-01`, `phase-03-videos/TD-02`, `phase-03-videos/TD-07`).
-5. Implementar `abortUpload()` com checagem de owner/status, `AbortMultipartUploadCommand`, remoção das partes persistidas e transição `uploading` → `draft`.
+2. Criar `VideosService` com `initiateUpload()` — valida proprietário/canal, gera `public_id`, persiste `Video` em `draft`, inicia multipart no storage e salva `multipart_upload_id`/`original_object_key` (per `phase-03-videos/TD-02`, `phase-03-videos/TD-05`, `phase-03-videos/TD-07`).
+3. Implementar `signUploadParts()` com checagem de owner, sessão multipart aberta em `draft` ou `uploading`, dedupe/range de `part_numbers`, e retorno de URLs assinadas de `UploadPartCommand` (per `phase-03-videos/TD-02`).
+4. Implementar `completeUpload()` em transação: persistir `VideoUploadPart`s, completar multipart, transicionar o rascunho com sessão aberta para `processing`, criar `VideoProcessingJob` e adicionar job `video.process` com tentativas/backoff explícitos (per `phase-03-videos/TD-01`, `phase-03-videos/TD-02`, `phase-03-videos/TD-07`).
+5. Implementar `abortUpload()` com checagem de owner/status, `AbortMultipartUploadCommand`, remoção das partes persistidas e da sessão multipart, mantendo o vídeo em `draft`.
 
 **Tests:**
 
 | Artifact | Layer | Test file |
 |----------|-------|-----------|
 | `VideosService` | Unit: owner checks, status transitions, duplicate part validation, enqueue failure mapping | `src/videos/videos.service.spec.ts` |
-| `VideosService` | Integration: DB transaction persists video/parts/job and rolls back on completion failure | `src/videos/videos.service.integration-spec.ts` |
+| `VideosService` | Integration: DB transaction persists video/parts/job, rolls back on storage completion failure, and marks video/job failed on enqueue failure | `src/videos/videos.service.integration-spec.ts` |
 | `VideoProcessingQueueService` | Unit: adds `video.process` with attempts/backoff and copied BullMQ job id | `src/videos/video-processing-queue.service.spec.ts` |
 
 **Dependencies:** SI-03.1 — BullMQ queue config; SI-03.2 — entities/repositories; SI-03.3 — storage and public-id services.
 
 **Acceptance criteria:**
 
-- Initiating upload with a valid owner channel returns status `uploading`, object key, upload ID and part size for a video ≤10GB.
+- Initiating upload with a valid owner channel returns status `draft`, object key, upload ID and part size for a video ≤10GB.
 - Signing upload parts for another user's video returns `VIDEO_NOT_OWNED`.
 - Completing an open upload returns `202`-equivalent service data with status `processing` and a persisted processing job.
 - Completing an already-enqueued upload returns `VIDEO_PROCESSING_ALREADY_ENQUEUED`.
@@ -169,7 +169,7 @@ Deliver video upload and processing for StreamTube: S3-compatible storage for vi
 
 **Acceptance criteria:**
 
-- `POST /videos/uploads` com payload válido retorna `201` com `id`, `public_id`, `status: "uploading"`, `multipart_upload_id`, `object_key` e `part_size_bytes`.
+- `POST /videos/uploads` com payload válido retorna `201` com `id`, `public_id`, `status: "draft"`, `multipart_upload_id`, `object_key` e `part_size_bytes`.
 - `POST /videos/uploads` com `size_bytes` acima de 10737418240 retorna `400` com `errorCode: "VALIDATION_ERROR"`.
 - `POST /videos/:id/upload-parts/sign` para vídeo de outro usuário retorna `403` com `errorCode: "VIDEO_NOT_OWNED"`.
 - `POST /videos/:id/upload-complete` com partes válidas retorna `202` com `status: "processing"` e `processing_job_id`.
@@ -320,7 +320,7 @@ Deliver video upload and processing for StreamTube: S3-compatible storage for vi
 **Response 201:**
 - id: string (uuid)
 - public_id: string
-- status: `uploading`
+- status: `draft`
 - multipart_upload_id: string
 - object_key: string
 - part_size_bytes: number
@@ -328,7 +328,6 @@ Deliver video upload and processing for StreamTube: S3-compatible storage for vi
 **Error responses:**
 - 401 Unauthorized: missing or invalid access token
 - 400 VALIDATION_ERROR: invalid body, unsupported media type, size over 10GB, invalid `part_count`
-- 409 VIDEO_UPLOAD_ALREADY_OPEN: authenticated user already has an incompatible open upload for the same draft when retrying the initiate flow
 - 500 STORAGE_MULTIPART_INIT_FAILED: storage could not create the multipart upload
 
 ---
@@ -353,7 +352,7 @@ Deliver video upload and processing for StreamTube: S3-compatible storage for vi
 - 401 Unauthorized: missing or invalid access token
 - 403 VIDEO_NOT_OWNED: authenticated user does not own the video draft
 - 404 VIDEO_NOT_FOUND: no video exists for `id`
-- 409 VIDEO_UPLOAD_NOT_OPEN: video is not in `uploading` status or has no `multipart_upload_id`
+- 409 VIDEO_UPLOAD_NOT_OPEN: video is not in `draft` or `uploading` status, or lacks `multipart_upload_id` or `original_object_key`
 - 400 VALIDATION_ERROR: invalid body or out-of-range part numbers
 - 500 STORAGE_PRESIGN_FAILED: storage presigning failed
 
@@ -380,11 +379,11 @@ Deliver video upload and processing for StreamTube: S3-compatible storage for vi
 - 401 Unauthorized: missing or invalid access token
 - 403 VIDEO_NOT_OWNED: authenticated user does not own the video draft
 - 404 VIDEO_NOT_FOUND: no video exists for `id`
-- 409 VIDEO_UPLOAD_NOT_OPEN: video is not in `uploading` status or has no `multipart_upload_id`
+- 409 VIDEO_UPLOAD_NOT_OPEN: video is not in `draft` or `uploading` status, or lacks `multipart_upload_id` or `original_object_key`
 - 409 VIDEO_PROCESSING_ALREADY_ENQUEUED: upload was already completed and processing was already enqueued
 - 400 VALIDATION_ERROR: missing parts, duplicated part numbers, or malformed ETags
 - 500 STORAGE_MULTIPART_COMPLETE_FAILED: storage rejected multipart completion
-- 500 VIDEO_PROCESSING_ENQUEUE_FAILED: upload completed but enqueue failed; video remains recoverable for a retry command
+- 500 VIDEO_PROCESSING_ENQUEUE_FAILED: upload completed but BullMQ enqueue failed; video and processing job are marked `failed` for operator-visible recovery
 
 ---
 
@@ -399,7 +398,7 @@ Deliver video upload and processing for StreamTube: S3-compatible storage for vi
 - 401 Unauthorized: missing or invalid access token
 - 403 VIDEO_NOT_OWNED: authenticated user does not own the video draft
 - 404 VIDEO_NOT_FOUND: no video exists for `id`
-- 409 VIDEO_UPLOAD_NOT_OPEN: video is not in `uploading` status or has no `multipart_upload_id`
+- 409 VIDEO_UPLOAD_NOT_OPEN: video is not in `draft` or `uploading` status, or lacks `multipart_upload_id` or `original_object_key`
 - 500 STORAGE_MULTIPART_ABORT_FAILED: storage could not abort the multipart upload
 
 ---
@@ -494,7 +493,6 @@ Deliver video upload and processing for StreamTube: S3-compatible storage for vi
 |-----------|------|---------|
 | VIDEO_NOT_FOUND | 404 | Requested video `id` or `public_id` does not exist |
 | VIDEO_NOT_OWNED | 403 | Authenticated user attempts to mutate or access another user's non-public Phase 03 video |
-| VIDEO_UPLOAD_ALREADY_OPEN | 409 | Initiate upload conflicts with an already-open incompatible draft/upload for the same retry flow |
 | VIDEO_UPLOAD_NOT_OPEN | 409 | Signing/completing/aborting is requested after upload is no longer open |
 | VIDEO_PROCESSING_ALREADY_ENQUEUED | 409 | Completion is retried after processing was already enqueued |
 | VIDEO_NOT_READY | 409 | Stream/download URL is requested before processing status is `ready` |
@@ -543,12 +541,17 @@ Deliver video upload and processing for StreamTube: S3-compatible storage for vi
 
 | From | To | Actor | Trigger |
 |------|----|-------|---------|
-| `draft` | `uploading` | API | Multipart upload is initiated |
-| `uploading` | `processing` | API | Multipart upload is completed and `video.process` is enqueued |
-| `uploading` | `draft` | API | Multipart upload is aborted before completion |
+| New video | `draft` | API | Multipart upload is initiated; its upload ID and object key identify the open session |
+| `draft` or `uploading` | `processing` | API | Open multipart upload is completed and `video.process` is enqueued |
+| `draft` or `uploading` | `draft` | API | Open multipart upload is aborted and session fields are cleared |
+| `processing` | `failed` | API | BullMQ enqueue fails after multipart completion |
 | `processing` | `ready` | Worker | Metadata extraction and thumbnail generation complete |
 | `processing` | `failed` | Worker | Retry policy is exhausted or media is invalid |
-| `failed` | `processing` | API or maintenance command | Explicit retry is requested in a later SI if included in this phase |
+| `failed` | `processing` | API or maintenance command | Deferred to a later retry workflow |
+
+`uploading` remains in the database enum and accepted open-upload states; the current initiation endpoint creates `draft` directly. No current endpoint transitions `draft` to `uploading`.
+
+**Storage endpoint contract:** API and worker I/O use `STORAGE_ENDPOINT` (`http://minio:9000` locally). All presigned upload-part and GET URLs, including thumbnails and downloads, are generated with a separate client using `STORAGE_PUBLIC_ENDPOINT` (`http://minio:9000` locally). Both clients share region, credentials, bucket and path-style settings. The public endpoint must be reachable by the external client; the local hostname requires a DNS/hosts entry pointing to the Docker host. That permanent host configuration is still pending. The public endpoint is never used for internal storage requests and its host must not be rewritten after signing.
 
 ---
 
@@ -566,18 +569,18 @@ SI-03.1 (root)
 
 ## Deliverables
 
-- [ ] SI-03.1 — Infra: configurar storage, fila e dependências de vídeo
-- [ ] SI-03.2 — Criar modelo de domínio de vídeos
-- [ ] SI-03.3 — Implementar serviços de storage e identificador público
-- [ ] SI-03.4 — Implementar lifecycle de upload multipart
-- [ ] SI-03.5 — Endpoint multipart de upload de vídeos
-- [ ] SI-03.6 — Worker de processamento de vídeo
-- [ ] SI-03.7 — Endpoints de detalhe, streaming e download
+- [x] SI-03.1 — Infra: configurar storage, fila e dependências de vídeo
+- [x] SI-03.2 — Criar modelo de domínio de vídeos
+- [x] SI-03.3 — Implementar serviços de storage e identificador público
+- [x] SI-03.4 — Implementar lifecycle de upload multipart
+- [x] SI-03.5 — Endpoint multipart de upload de vídeos
+- [x] SI-03.6 — Worker de processamento de vídeo
+- [x] SI-03.7 — Endpoints de detalhe, streaming e download
 
 **Full test suites:**
 
-- [ ] Backend unit/integration tests pass (`cd nestjs-project && docker compose exec nestjs-api npm test -- --runInBand`)
-- [ ] Backend e2e tests pass (`cd nestjs-project && docker compose exec nestjs-api npm run test:e2e`)
-- [ ] Type/compilation checks pass (`cd nestjs-project && docker compose exec nestjs-api npx tsc --noEmit`)
-- [ ] Backend build passes (`cd nestjs-project && docker compose exec nestjs-api npm run build`)
-- [ ] Lint passes (`cd nestjs-project && docker compose exec nestjs-api npm run lint`)
+- [x] Backend unit/integration tests pass (`cd nestjs-project && docker compose exec nestjs-api npm test -- --runInBand`)
+- [x] Backend e2e tests pass (`cd nestjs-project && docker compose exec nestjs-api npm run test:e2e`)
+- [x] Type/compilation checks pass (`cd nestjs-project && docker compose exec nestjs-api npx tsc --noEmit`)
+- [x] Backend build passes (`cd nestjs-project && docker compose exec nestjs-api npm run build`)
+- [x] Lint passes (`cd nestjs-project && docker compose exec nestjs-api npm run lint`)

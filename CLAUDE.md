@@ -12,7 +12,7 @@ This is a monorepo with two main areas:
 
 - `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `next-frontend/` — existing Next.js 16 App Router frontend; browser traffic uses its BFF.
 
 ## Architecture (C4 Container Diagram)
 
@@ -23,8 +23,20 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 - **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
 - **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Message Queue** (Redis + BullMQ) → video processing job queue
 - **Email Service** (SMTP) → account confirmation and password recovery
+
+## Phase 03 — Videos
+
+The backend implements video upload and processing in `nestjs-project/src/videos/`.
+
+- Uploads use API-orchestrated S3-compatible multipart uploads: the API creates a video in `draft` status, opens a multipart session, and signs part URLs on request. Video bytes go directly to MinIO/S3.
+- Object storage is MinIO locally, using the `streamtube-videos` bucket and typed key prefixes for raw videos, processed videos, and thumbnails.
+- Processing uses BullMQ backed by the `redis` Compose service. The API enqueues `video.process` jobs after multipart completion.
+- `video-worker` is a separate Compose service running `npm run start:worker`; it consumes jobs, downloads the source object to worker-local temp storage, runs `ffprobe`/`ffmpeg`, uploads the processed object and thumbnail, and updates PostgreSQL.
+- Ready videos expose short-lived signed URLs for streaming and download. Storage handles byte-range playback for the signed object URL.
+- The active lifecycle is `draft` -> `processing` -> `ready` or `failed`. An open upload is identified by `multipart_upload_id` and `original_object_key`; abort leaves a `draft` without that session. The enum also accepts `uploading`, but current initiation does not produce it.
+- Internal storage operations use `STORAGE_ENDPOINT=http://minio:9000`; client-facing upload, thumbnail, streaming, and download signatures use `STORAGE_PUBLIC_ENDPOINT=http://minio:9000` in local development.
 
 ## Docker Networking
 
@@ -36,6 +48,8 @@ Inside a container, `localhost` refers to the container itself, not the host mac
 - **Wrong:** `DB_HOST=localhost`
 
 This applies to all environment variables, configuration files, and code that references service hosts.
+
+`STORAGE_PUBLIC_ENDPOINT` is a client-facing URL used only to generate signatures. The local default is `http://minio:9000`; external clients need a DNS/hosts entry resolving `minio` to the Docker host. Keep `STORAGE_ENDPOINT` on the Compose service name and never rewrite a signed URL's host after signing. See `nestjs-project/README.md` for address configuration.
 
 ## Working Principles
 

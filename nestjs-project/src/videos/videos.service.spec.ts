@@ -27,7 +27,7 @@ function video(overrides: Partial<Video> = {}): Video {
     channel_id: 'channel-1',
     public_id: 'public-1',
     title: null,
-    status: VideoStatus.UPLOADING,
+    status: VideoStatus.DRAFT,
     original_object_key: 'videos/raw/owner-1/video-1/clip.mp4',
     processed_object_key: null,
     thumbnail_object_key: null,
@@ -58,6 +58,7 @@ describe('VideosService', () => {
       ...entity,
     })),
     delete: jest.fn(),
+    update: jest.fn(),
   };
   const dataSource = {
     transaction: jest.fn((callback) => callback(manager)),
@@ -144,7 +145,7 @@ describe('VideosService', () => {
     ).resolves.toEqual({
       id: 'generated-id',
       publicId: 'public-1',
-      status: VideoStatus.UPLOADING,
+      status: VideoStatus.DRAFT,
       multipartUploadId: 'upload-1',
       objectKey: 'videos/raw/owner-1/generated-id/clip.mp4',
       partSizeBytes: 5 * 1024 * 1024,
@@ -288,6 +289,19 @@ describe('VideosService', () => {
         parts: [{ partNumber: 1, eTag: '"etag-1"' }],
       }),
     ).rejects.toThrow(VideoProcessingEnqueueFailedException);
+
+    expect(manager.update).toHaveBeenCalledWith(Video, 'video-1', {
+      status: VideoStatus.FAILED,
+      failure_reason: 'Failed to enqueue video processing job',
+    });
+    expect(manager.update).toHaveBeenCalledWith(
+      VideoProcessingJob,
+      'processing-job-1',
+      {
+        status: VideoProcessingJobStatus.FAILED,
+        last_error: 'Failed to enqueue video processing job',
+      },
+    );
   });
 
   it('rejects completion when processing has already been enqueued', async () => {

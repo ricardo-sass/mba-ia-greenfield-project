@@ -37,8 +37,8 @@ export class InitiateVideoUploadResponseDto {
   @ApiProperty()
   public_id: string;
 
-  @ApiProperty({ enum: [VideoStatus.UPLOADING] })
-  status: VideoStatus.UPLOADING;
+  @ApiProperty({ enum: [VideoStatus.DRAFT] })
+  status: VideoStatus.DRAFT;
 
   @ApiProperty()
   multipart_upload_id: string;

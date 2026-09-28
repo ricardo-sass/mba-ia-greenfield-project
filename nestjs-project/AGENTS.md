@@ -34,6 +34,11 @@ docker compose exec nestjs-api npm run start:dev
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — SMTP capture, ports `1025` and `8025`
+- `redis` — BullMQ queue storage, port `6379`
+- `minio` — S3-compatible storage, ports `9000` and `9001`
+- `minio-init` — one-shot creation of the `streamtube-videos` bucket
+- `video-worker` — separate NestJS process consuming BullMQ jobs and running FFmpeg/ffprobe
 
 All verification and teardown commands run on the **host machine**:
 
@@ -148,6 +153,23 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+
+### Videos Module
+
+`src/videos/` implements Phase 03 upload and processing:
+
+- `POST /videos/uploads` creates an authenticated owner video in `draft` status and initiates direct multipart upload to MinIO/S3.
+- `POST /videos/:id/upload-parts/sign` returns presigned upload-part URLs. Video bytes go directly to storage.
+- `POST /videos/:id/upload-complete` completes the multipart upload, transitions the video to `processing`, persists a processing job, and enqueues `video.process` in BullMQ.
+- `DELETE /videos/:id/upload` aborts an open multipart upload, clears its session, and leaves the video in `draft`.
+- `GET /videos/:id` returns owner-only lifecycle and metadata details.
+- `GET /videos/:publicId/stream-url` and `GET /videos/:publicId/download-url` return owner-only signed storage URLs for `ready` videos.
+
+The `video-worker` service runs `src/worker-main.ts` and registers `VideosWorkerModule`. It consumes BullMQ jobs from Redis, downloads source files to temp storage, runs `ffprobe`/`ffmpeg`, uploads processed media and thumbnails, and updates PostgreSQL to `ready` or `failed`.
+
+The active lifecycle is `draft` -> `processing` -> `ready` or `failed`. An open upload requires both `multipart_upload_id` and `original_object_key`. `uploading` remains accepted by the enum and open-upload checks, but current initiation produces `draft`.
+
+Storage uses `STORAGE_ENDPOINT=http://minio:9000` internally and `STORAGE_BUCKET=streamtube-videos`. Queue connections use `QUEUE_REDIS_HOST=redis`. `STORAGE_PUBLIC_ENDPOINT=http://minio:9000` is used only for client-facing signatures, never for container-to-container requests. Configure the external storage hostname for remote clients and deployments; preserve the signed host when routing requests.
 
 ## Code Conventions
 

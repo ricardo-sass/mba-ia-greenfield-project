@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -35,16 +35,16 @@ export class VideoMediaProcessorService {
   ) {}
 
   async process(input: ProcessVideoInput): Promise<ProcessedVideoResult> {
-    const source = await this.storageService.getObjectBuffer(
-      input.originalObjectKey,
-    );
     const workdir = await mkdtemp(join(tmpdir(), 'streamtube-video-'));
     const inputFilename = input.video.original_filename ?? 'video';
     const inputPath = join(workdir, `source${extname(inputFilename)}`);
     const thumbnailPath = join(workdir, 'thumbnail.jpg');
 
     try {
-      await writeFile(inputPath, source);
+      await this.storageService.downloadObjectToFile({
+        objectKey: input.originalObjectKey,
+        filePath: inputPath,
+      });
       const probe = await this.runCommand('ffprobe', [
         '-v',
         'error',
@@ -79,9 +79,9 @@ export class VideoMediaProcessorService {
         filename: `${basename(inputFilename, extname(inputFilename))}.jpg`,
       });
 
-      await this.storageService.uploadObject({
+      await this.storageService.uploadObjectFromFile({
         objectKey: processedObjectKey,
-        body: source,
+        filePath: inputPath,
         contentType: input.video.mime_type ?? undefined,
         metadata: { videoId: input.video.id },
       });

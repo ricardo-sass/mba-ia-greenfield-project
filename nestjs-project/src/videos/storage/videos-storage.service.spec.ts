@@ -3,10 +3,15 @@ import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   GetObjectCommand,
+  PutObjectCommand,
   S3Client,
   UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import {
   StorageMultipartAbortFailedException,
   StorageMultipartCompleteFailedException,
@@ -21,6 +26,7 @@ jest.mock('@aws-sdk/s3-request-presigner', () => ({
 
 const storage = {
   endpoint: 'http://minio:9000',
+  publicEndpoint: 'https://media.example.com',
   region: 'us-east-1',
   bucket: 'streamtube-videos',
   accessKeyId: 'streamtube',
@@ -60,6 +66,10 @@ describe('VideosStorageService', () => {
     });
 
     const command = sendSpy.mock.calls[0][0] as CreateMultipartUploadCommand;
+    const internalClient = sendSpy.mock.contexts[0] as S3Client;
+    expect(await internalClient.config.endpoint?.()).toMatchObject({
+      hostname: 'minio',
+    });
     expect(command).toBeInstanceOf(CreateMultipartUploadCommand);
     expect(command.input).toEqual({
       Bucket: 'streamtube-videos',
@@ -94,7 +104,10 @@ describe('VideosStorageService', () => {
       expiresInSeconds: 900,
     });
 
-    const [, command, options] = getSignedUrlMock.mock.calls[0];
+    const [client, command, options] = getSignedUrlMock.mock.calls[0];
+    expect(await client.config.endpoint?.()).toMatchObject({
+      hostname: 'media.example.com',
+    });
     expect(command).toBeInstanceOf(UploadPartCommand);
     expect(command.input).toEqual({
       Bucket: 'streamtube-videos',
@@ -185,7 +198,10 @@ describe('VideosStorageService', () => {
       expiresInSeconds: 300,
     });
 
-    const [, command, options] = getSignedUrlMock.mock.calls[0];
+    const [client, command, options] = getSignedUrlMock.mock.calls[0];
+    expect(await client.config.endpoint?.()).toMatchObject({
+      hostname: 'media.example.com',
+    });
     expect(command).toBeInstanceOf(GetObjectCommand);
     expect(command.input).toEqual({
       Bucket: 'streamtube-videos',
@@ -203,7 +219,10 @@ describe('VideosStorageService', () => {
       downloadFilename: 'clip.mp4',
     });
 
-    const [, command] = getSignedUrlMock.mock.calls[0];
+    const [client, command] = getSignedUrlMock.mock.calls[0];
+    expect(await client.config.endpoint?.()).toMatchObject({
+      hostname: 'media.example.com',
+    });
     const getObjectCommand = command as GetObjectCommand;
     expect(getObjectCommand).toBeInstanceOf(GetObjectCommand);
     expect(getObjectCommand.input.ResponseContentDisposition).toBe(
@@ -221,5 +240,60 @@ describe('VideosStorageService', () => {
         partNumber: 1,
       }),
     ).rejects.toThrow(StoragePresignFailedException);
+  });
+
+  it('downloads objects to a file by piping the S3 body stream', async () => {
+    const workdir = await mkdtemp(join(tmpdir(), 'streamtube-storage-'));
+    const outputPath = join(workdir, 'clip.mp4');
+    const body = new PassThrough();
+    sendSpy.mockResolvedValueOnce({ Body: body } as never);
+
+    const download = service.downloadObjectToFile({
+      objectKey: 'videos/raw/u1/v1/clip.mp4',
+      filePath: outputPath,
+    });
+    body.end(Buffer.from('video-bytes'));
+
+    await expect(download).resolves.toBeUndefined();
+    await expect(readFile(outputPath, 'utf8')).resolves.toBe('video-bytes');
+
+    const command = sendSpy.mock.calls[0][0] as GetObjectCommand;
+    expect(command).toBeInstanceOf(GetObjectCommand);
+    expect(command.input).toEqual({
+      Bucket: 'streamtube-videos',
+      Key: 'videos/raw/u1/v1/clip.mp4',
+    });
+
+    await rm(workdir, { force: true, recursive: true });
+  });
+
+  it('uploads objects from a file with a readable stream body', async () => {
+    const workdir = await mkdtemp(join(tmpdir(), 'streamtube-storage-'));
+    const inputPath = join(workdir, 'clip.mp4');
+    await writeFile(inputPath, Buffer.from('video-bytes'));
+    sendSpy.mockResolvedValueOnce({} as never);
+
+    await service.uploadObjectFromFile({
+      objectKey: 'videos/processed/u1/v1/clip.mp4',
+      filePath: inputPath,
+      contentType: 'video/mp4',
+      metadata: { videoId: 'v1' },
+    });
+
+    const command = sendSpy.mock.calls[0][0] as PutObjectCommand;
+    expect(command).toBeInstanceOf(PutObjectCommand);
+    expect(command.input).toEqual(
+      expect.objectContaining({
+        Bucket: 'streamtube-videos',
+        Key: 'videos/processed/u1/v1/clip.mp4',
+        ContentType: 'video/mp4',
+        Metadata: { videoId: 'v1' },
+      }),
+    );
+    expect(command.input.Body).toEqual(
+      expect.objectContaining({ path: inputPath }),
+    );
+
+    await rm(workdir, { force: true, recursive: true });
   });
 });

@@ -45,6 +45,24 @@ describe('envValidationSchema — SWAGGER_ENABLED', () => {
 });
 
 describe('envValidationSchema — video infrastructure', () => {
+  it('should reject a non-HTTP public storage endpoint', () => {
+    const { error } = validate({
+      STORAGE_PUBLIC_ENDPOINT: 'ftp://media.example.com',
+    });
+
+    expect(error?.message).toContain('STORAGE_PUBLIC_ENDPOINT');
+  });
+
+  it('should accept a public endpoint separate from the Docker endpoint', () => {
+    const { value, error } = validate({
+      STORAGE_PUBLIC_ENDPOINT: 'https://media.example.com',
+    });
+
+    expect(error).toBeUndefined();
+    expect(value.STORAGE_ENDPOINT).toBe('http://minio:9000');
+    expect(value.STORAGE_PUBLIC_ENDPOINT).toBe('https://media.example.com');
+  });
+
   it('should reject missing required storage values', () => {
     const { error } = validate({ STORAGE_ENDPOINT: undefined as never });
 
@@ -83,8 +101,10 @@ describe('envValidationSchema — video infrastructure', () => {
     const { value, error } = validate({});
 
     expect(error).toBeUndefined();
+    expect(value.DB_HOST).toBe('db');
     expect(value.STORAGE_ENDPOINT).toBe('http://minio:9000');
     expect(value.QUEUE_REDIS_HOST).toBe('redis');
+    expect(value.STORAGE_PUBLIC_ENDPOINT).toBe('http://minio:9000');
     expect(value.VIDEO_MAX_UPLOAD_BYTES).toBe(10 * 1024 * 1024 * 1024);
     expect(value.STORAGE_UPLOAD_PART_URL_TTL_SECONDS).toBe(900);
     expect(value.STORAGE_READ_URL_TTL_SECONDS).toBe(300);

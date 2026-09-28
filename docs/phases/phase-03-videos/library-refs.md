@@ -1,35 +1,35 @@
 ---
 libs:
   "@nestjs/bullmq":
-    version: "planned (not yet in nestjs-project/package.json)"
+    version: "^11.0.5"
     context7_id: "/nestjs/bull"
     fetched_at: "2026-09-22T00:39:02-03:00"
   "bullmq":
-    version: "planned (not yet in nestjs-project/package.json)"
+    version: "^5.81.5"
     context7_id: "/nestjs/bull"
     fetched_at: "2026-09-22T00:39:02-03:00"
   "@aws-sdk/client-s3":
-    version: "planned (not yet in nestjs-project/package.json)"
+    version: "^3.1137.0"
     context7_id: "/aws/aws-sdk-js-v3"
     fetched_at: "2026-09-22T00:39:02-03:00"
   "@aws-sdk/s3-request-presigner":
-    version: "planned (not yet in nestjs-project/package.json)"
+    version: "^3.1137.0"
     context7_id: "/aws/aws-sdk-js-v3"
     fetched_at: "2026-09-22T00:39:02-03:00"
   "ffmpeg":
-    version: "Docker image package version TBD"
+    version: "5.1.9-0+deb12u1 (Docker image package)"
     context7_id: "/websites/ffmpeg_documentation"
     fetched_at: "2026-09-22T00:39:02-03:00"
   "ffprobe":
-    version: "Docker image package version TBD"
+    version: "5.1.9-0+deb12u1 (Docker image package)"
     context7_id: "/websites/ffmpeg_documentation"
     fetched_at: "2026-09-22T00:39:02-03:00"
   "nanoid":
-    version: "planned (not yet in nestjs-project/package.json)"
+    version: "^5.1.16"
     context7_id: "official-docs-fallback: https://github.com/ai/nanoid"
     fetched_at: "2026-09-22T00:39:02-03:00"
 sources_mtime:
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-22 00:25:05.345111716 -0300"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-24 20:02:28.447483599 -0300"
 ---
 
 # Library References - phase-03-videos
@@ -77,6 +77,8 @@ Relevant notes:
 - Use `GetObjectCommand` for download/stream access. S3-compatible storage handles object range requests once the browser/client uses the signed object URL.
 
 ### @aws-sdk/s3-request-presigner
+
+Endpoint correction checked via Context7 `/aws/aws-sdk-js-v3` on 2026-09-24 for the installed SDK v3 API (`@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` 3.1137.0). Context7 returned the v3 main documentation, not a version-pinned page; compatibility is checked by compilation and real MinIO tests. `S3Client({ endpoint, region, credentials, forcePathStyle })` and `getSignedUrl(client, command)` support a dedicated client with the external endpoint. Internal I/O retains its own client. Never rewrite the host after signing.
 
 Source: Context7 `/aws/aws-sdk-js-v3`, selected for `getSignedUrl` and S3 presigner examples.
 

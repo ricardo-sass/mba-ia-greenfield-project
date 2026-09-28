@@ -10,6 +10,7 @@ const parseBoolean = (value: string | undefined, defaultValue: boolean) => {
 
 export default registerAs('storage', () => ({
   endpoint: process.env.STORAGE_ENDPOINT ?? 'http://minio:9000',
+  publicEndpoint: process.env.STORAGE_PUBLIC_ENDPOINT ?? 'http://minio:9000',
   region: process.env.STORAGE_REGION ?? 'us-east-1',
   bucket: process.env.STORAGE_BUCKET ?? 'streamtube-videos',
   accessKeyId: process.env.STORAGE_ACCESS_KEY_ID ?? 'streamtube',

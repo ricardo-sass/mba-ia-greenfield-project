@@ -3,13 +3,13 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-09-17 20:33:50.996806003 -0300"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-22 00:25:05.345111716 -0300"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-09-24 20:02:28.447483599 -0300"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-09-17 21:41:36.287559685 -0300"
   docs/phases/phase-01-configuracao-base/context.md: "2026-09-17 21:41:36.288405748 -0300"
   docs/phases/phase-02-auth/context.md: "2026-09-17 21:41:36.289019826 -0300"
   docs/phases/phase-02-auth-frontend/context.md: "2026-09-17 21:41:36.288498038 -0300"
   .codex/skills/testing-guide-nestjs-project/SKILL.md: "2026-09-17 22:26:23.191929223 -0300"
-  docs/phases/phase-03-videos/library-refs.md: "2026-09-22 00:39:43.610456631 -0300"
+  docs/phases/phase-03-videos/library-refs.md: "2026-09-24 20:06:11.732448819 -0300"
 ---
 
 # phase-03-videos — Context
@@ -39,6 +39,8 @@ sources_mtime:
 - `nestjs-project` — backend upload/storage/queue/worker/API scope for Phase 03.
 
 **Deferred subprojects:** `next-frontend`
+
+**Implementation clarifications (2026-09-24):** Upload initiation persists `draft` with an open multipart session; completion moves to `processing` and abort clears the session while retaining `draft`. The enum still accepts `uploading`, but no current endpoint assigns it. Storage I/O uses the internal `STORAGE_ENDPOINT`; presigned upload and GET URLs use the externally reachable `STORAGE_PUBLIC_ENDPOINT`, preserving the signed host (TD-06/TD-07 clarifications).
 
 **Sequencing notes:** Depende de: Fase 01, Fase 02.
 

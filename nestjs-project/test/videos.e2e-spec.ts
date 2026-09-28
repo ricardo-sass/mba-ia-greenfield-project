@@ -184,7 +184,7 @@ describe('videos', () => {
         owner_user_id: owner.user.id,
         channel_id: owner.channel.id,
         public_id: nextPublicId(),
-        status: VideoStatus.UPLOADING,
+        status: VideoStatus.DRAFT,
         original_object_key: `videos/raw/${owner.user.id}/video-1/clip.mp4`,
         multipart_upload_id: 'upload-1',
         original_filename: 'clip.mp4',
@@ -216,7 +216,7 @@ describe('videos', () => {
   }
 
   // API Contracts - Multipart Upload Endpoints
-  test('initiate-valid-upload-returns-uploading-draft', async () => {
+  test('initiate-valid-upload-returns-draft', async () => {
     const { accessToken, user } = await registerConfirmAndLogin(
       'video-owner@example.com',
     );
@@ -233,7 +233,7 @@ describe('videos', () => {
       .expect(201);
 
     expect(response.body).toMatchObject({
-      status: 'uploading',
+      status: 'draft',
       multipart_upload_id: 'upload-1',
       part_size_bytes: 5 * 1024 * 1024,
     });
@@ -245,7 +245,7 @@ describe('videos', () => {
       id: response.body.id,
     });
     expect(persisted.owner_user_id).toBe(user.id);
-    expect(persisted.status).toBe(VideoStatus.UPLOADING);
+    expect(persisted.status).toBe(VideoStatus.DRAFT);
     expect(persisted.multipart_upload_id).toBe('upload-1');
   });
 
